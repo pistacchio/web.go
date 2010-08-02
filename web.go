@@ -35,8 +35,14 @@ func init() {
     staticDir = path.Join(root, "static")
     
     // configuration
-    configFile = path.Join(root, "webgo.config")
+    configFile := path.Join(root, "webgo.config")
     Config, _ = conf.ReadConfigFile(configFile)
+    
+    // cookie security configuration
+    cookieSecretSalt, err := Config.GetString("security", "cookieSecretSalt")
+    if err != nil {
+      SetCookieSecret(cookieSecretSalt)
+    }
 }
 
 var (
@@ -47,8 +53,7 @@ var (
   staticDir string
   
   // configuration
-  configFile string
-  Config *conf.ConfigFile //, _ = conf.ReadConfigFile(configFile)
+  Config *conf.ConfigFile
   
   routes vector.Vector
 )
