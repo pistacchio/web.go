@@ -16,10 +16,42 @@ import (
     "strconv"
     "strings"
     "time"
+    "goconf.googlecode.com/hg"
 )
 
-//secret key used to store cookies
-var secret = ""
+func init() {
+    contextType = reflect.Typeof(Context{})
+    //find the location of the exe file
+    arg0 := path.Clean(os.Args[0])
+    wd, _ := os.Getwd()
+    var exeFile string
+    if strings.HasPrefix(arg0, "/") {
+        exeFile = arg0
+    } else {
+        //TODO for robustness, search each directory in $PATH
+        exeFile = path.Join(wd, arg0)
+    }
+    root, _ := path.Split(exeFile)
+    staticDir = path.Join(root, "static")
+    
+    // configuration
+    configFile = path.Join(root, "webgo.config")
+    Config, _ = conf.ReadConfigFile(configFile)
+}
+
+var (
+  //secret key used to store cookies
+  secret = ""
+
+  contextType reflect.Type
+  staticDir string
+  
+  // configuration
+  configFile string
+  Config *conf.ConfigFile //, _ = conf.ReadConfigFile(configFile)
+  
+  routes vector.Vector
+)
 
 type conn interface {
     StartResponse(status int)
@@ -27,6 +59,26 @@ type conn interface {
     Write(data []byte) (n int, err os.Error)
     Close()
 }
+
+/*
+ * Secret cookies
+ */
+
+func SetCookieSecret(key string) { secret = key }
+
+func getCookieSig(val []byte, timestamp string) string {
+    hm := hmac.NewSHA1([]byte(secret))
+
+    hm.Write(val)
+    hm.Write([]byte(timestamp))
+
+    hex := fmt.Sprintf("%02x", hm.Sum())
+    return hex
+}
+
+/*
+ * Context
+ */
 
 type Context struct {
     *Request
@@ -83,18 +135,6 @@ func (ctx *Context) SetCookie(name string, value string, age int64) {
     ctx.SetHeader("Set-Cookie", cookie, false)
 }
 
-func SetCookieSecret(key string) { secret = key }
-
-func getCookieSig(val []byte, timestamp string) string {
-    hm := hmac.NewSHA1([]byte(secret))
-
-    hm.Write(val)
-    hm.Write([]byte(timestamp))
-
-    hex := fmt.Sprintf("%02x", hm.Sum())
-    return hex
-}
-
 func (ctx *Context) SetSecureCookie(name string, val string, age int64) {
     //base64 encode the val
     if len(secret) == 0 {
@@ -148,24 +188,9 @@ func (ctx *Context) GetSecureCookie(name string) (string, bool) {
     return string(res), true
 }
 
-var contextType reflect.Type
-var staticDir string
-
-func init() {
-    contextType = reflect.Typeof(Context{})
-    //find the location of the exe file
-    arg0 := path.Clean(os.Args[0])
-    wd, _ := os.Getwd()
-    var exeFile string
-    if strings.HasPrefix(arg0, "/") {
-        exeFile = arg0
-    } else {
-        //TODO for robustness, search each directory in $PATH
-        exeFile = path.Join(wd, arg0)
-    }
-    root, _ := path.Split(exeFile)
-    staticDir = path.Join(root, "static")
-}
+/*
+ * route
+ */
 
 type route struct {
     r       string
@@ -173,8 +198,6 @@ type route struct {
     method  string
     handler *reflect.FuncValue
 }
-
-var routes vector.Vector
 
 func addRoute(r string, method string, handler interface{}) {
     cr, err := regexp.Compile(r)
@@ -185,6 +208,10 @@ func addRoute(r string, method string, handler interface{}) {
     fv := reflect.NewValue(handler).(*reflect.FuncValue)
     routes.Push(route{r, cr, method, fv})
 }
+
+/*
+ * httpConn
+ */
 
 type httpConn struct {
     conn *http.Conn

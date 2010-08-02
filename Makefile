@@ -13,6 +13,7 @@ GOFILES=\
 	scgi.go\
 	servefile.go\
 	status.go\
+	session.go\
 	web.go\
 
 include $(GOROOT)/src/Make.pkg
@@ -25,5 +26,7 @@ format:
 	${GOFMT} -w status.go
 	${GOFMT} -w web.go
 	${GOFMT} -w web_test.go
+	${GOFMT} -w session.go
+	${GOFMT} -w examples/session/session.go
 	${GOFMT} -w examples/hello.go
 	${GOFMT} -w examples/arcchallenge.go
