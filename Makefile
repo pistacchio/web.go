@@ -13,7 +13,6 @@ GOFILES=\
 	scgi.go\
 	servefile.go\
 	status.go\
-	session.go\
 	web.go\
 
 include $(GOROOT)/src/Make.pkg

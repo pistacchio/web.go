@@ -17,6 +17,7 @@ import (
     "strings"
     "time"
     "goconf.googlecode.com/hg"
+    "rand"
 )
 
 func init() {
@@ -40,9 +41,12 @@ func init() {
     
     // cookie security configuration
     cookieSecretSalt, err := Config.GetString("security", "cookieSecretSalt")
-    if err != nil {
+    if err == nil {
       SetCookieSecret(cookieSecretSalt)
     }
+    Sessions = make(map[string]SessionType)
+    
+    // TODO goroutine to keep Sessions clean from old data
 }
 
 var (
@@ -52,10 +56,9 @@ var (
   contextType reflect.Type
   staticDir string
   
-  // configuration
-  Config *conf.ConfigFile
-  
+  Config *conf.ConfigFile  
   routes vector.Vector
+  Sessions map[string]SessionType
 )
 
 type conn interface {
@@ -65,11 +68,15 @@ type conn interface {
     Close()
 }
 
+type SessionType map[string]interface{}
+
 /*
  * Secret cookies
  */
 
-func SetCookieSecret(key string) { secret = key }
+func SetCookieSecret(key string) {
+  secret = key
+}
 
 func getCookieSig(val []byte, timestamp string) string {
     hm := hmac.NewSHA1([]byte(secret))
@@ -193,6 +200,32 @@ func (ctx *Context) GetSecureCookie(name string) (string, bool) {
     return string(res), true
 }
 
+/* context session handling */
+func (ctx *Context) SetSessionItem (key string, value interface{}) {
+  var sessionId string
+
+  if ctx.Request.SessionId == "" || Sessions[sessionId] == nil {
+    sessionId = strconv.Itoa64(rand.Int63())
+    ctx.SetSecureCookie("sessionId", sessionId, 0)
+    ctx.Request.SessionId = sessionId
+    Sessions[sessionId] = make(SessionType)
+  }
+
+  Sessions[sessionId][key] = value
+}
+
+func (ctx *Context) GetSessionItem (key string) interface{} {
+  if ctx.Request.SessionId != "" {
+    session := Sessions[ctx.Request.SessionId]
+    if session == nil { 
+      return nil
+    }
+    return session[key]
+  }
+  return nil
+}
+
+
 /*
  * route
  */
@@ -279,6 +312,9 @@ func routeHandler(req *Request, c conn) {
     }
 
     ctx := Context{req, &c, false}
+
+    // add session data
+    perr = req.parseSession(&ctx)
 
     //set some default headers
     ctx.SetHeader("Content-Type", "text/html; charset=utf-8", true)
