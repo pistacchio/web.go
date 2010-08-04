@@ -44,8 +44,7 @@ func init() {
     if err == nil {
       SetCookieSecret(cookieSecretSalt)
     }
-    Sessions = make(map[string]SessionType)
-    
+    Sessions = make(map[string]*Session)
     // TODO goroutine to keep Sessions clean from old data
 }
 
@@ -58,7 +57,7 @@ var (
   
   Config *conf.ConfigFile  
   routes vector.Vector
-  Sessions map[string]SessionType
+  Sessions map[string]*Session
 )
 
 type conn interface {
@@ -69,6 +68,11 @@ type conn interface {
 }
 
 type SessionType map[string]interface{}
+
+type Session struct {
+  SessionType
+  lastAccess int64
+}
 
 /*
  * Secret cookies
@@ -208,19 +212,21 @@ func (ctx *Context) SetSessionItem (key string, value interface{}) {
     sessionId = strconv.Itoa64(rand.Int63())
     ctx.SetSecureCookie("sessionId", sessionId, 0)
     ctx.Request.SessionId = sessionId
-    Sessions[sessionId] = make(SessionType)
+    Sessions[sessionId] = new(Session)
+    Sessions[sessionId].SessionType = make(SessionType)
   }
 
-  Sessions[sessionId][key] = value
+  Sessions[sessionId].SessionType[key] = value
 }
 
 func (ctx *Context) GetSessionItem (key string) interface{} {
   if ctx.Request.SessionId != "" {
-    session := Sessions[ctx.Request.SessionId]
+    session := Sessions[ctx.Request.SessionId].SessionType
     if session == nil { 
       return nil
     }
     return session[key]
+    
   }
   return nil
 }

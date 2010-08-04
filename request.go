@@ -9,6 +9,7 @@ import (
     "io/ioutil"
     "os"
     "strings"
+    "time"
 )
 
 type filedata struct {
@@ -267,7 +268,11 @@ func (r *Request) parseSession(ctx *Context) (err os.Error){
   }
 
   r.SessionId = sessionId
-
+  
+  session, ok := Sessions[sessionId]
+  if ok {
+    session.lastAccess = time.Seconds()
+  }
   return nil
 }
 
