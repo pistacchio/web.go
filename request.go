@@ -9,7 +9,7 @@ import (
     "io/ioutil"
     "os"
     "strings"
-    "time"
+    //"time"
 )
 
 type filedata struct {
@@ -32,7 +32,6 @@ type Request struct {
     UserAgent  string
     Params     map[string][]string
     Cookies    map[string]string
-    SessionId  string
     Files      map[string]filedata
 }
 
@@ -255,25 +254,6 @@ func (r *Request) parseCookies() (err os.Error) {
     }
 
     return nil
-}
-
-func (r *Request) parseSession(ctx *Context) (err os.Error){
-  if r.Cookies == nil {
-    return nil
-  }
-
-  sessionId, ok := ctx.GetSecureCookie("sessionId")
-  if !ok {
-    return nil
-  }
-
-  r.SessionId = sessionId
-  
-  session, ok := Sessions[sessionId]
-  if ok {
-    session.lastAccess = time.Seconds()
-  }
-  return nil
 }
 
 //Returns the first parameter given a name, or an empty string

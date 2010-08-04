@@ -44,8 +44,8 @@ func init() {
     if err == nil {
       SetCookieSecret(cookieSecretSalt)
     }
-    Sessions = make(map[string]*Session)
-    // TODO goroutine to keep Sessions clean from old data
+    
+    SessionHandler = &MemorySessionHandler{make(map[string]Session)}
 }
 
 var (
@@ -57,7 +57,7 @@ var (
   
   Config *conf.ConfigFile  
   routes vector.Vector
-  Sessions map[string]*Session
+  SessionHandler sessionHandler
 )
 
 type conn interface {
@@ -65,13 +65,6 @@ type conn interface {
     SetHeader(hdr string, val string, unique bool)
     Write(data []byte) (n int, err os.Error)
     Close()
-}
-
-type SessionType map[string]interface{}
-
-type Session struct {
-  SessionType
-  lastAccess int64
 }
 
 /*
@@ -99,6 +92,8 @@ func getCookieSig(val []byte, timestamp string) string {
 type Context struct {
     *Request
     *conn
+    Session
+    SessionId string
     responseStarted bool
 }
 
@@ -138,6 +133,10 @@ func (ctx *Context) NotFound(message string) {
     ctx.StartResponse(404)
     ctx.WriteString(message)
 }
+
+/*
+ * Cookies
+ */
 
 //Sets a cookie -- duration is the amount of time in seconds. 0 = forever
 func (ctx *Context) SetCookie(name string, value string, age int64) {
@@ -203,34 +202,6 @@ func (ctx *Context) GetSecureCookie(name string) (string, bool) {
     res, _ := ioutil.ReadAll(encoder)
     return string(res), true
 }
-
-/* context session handling */
-func (ctx *Context) SetSessionItem (key string, value interface{}) {
-  var sessionId string
-
-  if ctx.Request.SessionId == "" || Sessions[sessionId] == nil {
-    sessionId = strconv.Itoa64(rand.Int63())
-    ctx.SetSecureCookie("sessionId", sessionId, 0)
-    ctx.Request.SessionId = sessionId
-    Sessions[sessionId] = new(Session)
-    Sessions[sessionId].SessionType = make(SessionType)
-  }
-
-  Sessions[sessionId].SessionType[key] = value
-}
-
-func (ctx *Context) GetSessionItem (key string) interface{} {
-  if ctx.Request.SessionId != "" {
-    session := Sessions[ctx.Request.SessionId].SessionType
-    if session == nil { 
-      return nil
-    }
-    return session[key]
-    
-  }
-  return nil
-}
-
 
 /*
  * route
@@ -317,10 +288,12 @@ func routeHandler(req *Request, c conn) {
         log.Stderrf("Failed to parse cookies %q", perr.String())
     }
 
-    ctx := Context{req, &c, false}
-
-    // add session data
-    perr = req.parseSession(&ctx)
+    ctx := *new(Context)
+    ctx.Request = req
+    ctx.conn = &c
+    ctx.Session = make(map[string]interface{})
+    ctx.responseStarted = false
+    //{req, &c, make(map[string]interface{}), false}
 
     //set some default headers
     ctx.SetHeader("Content-Type", "text/html; charset=utf-8", true)
@@ -382,12 +355,14 @@ func routeHandler(req *Request, c conn) {
             valArgs[i] = args.At(i).(reflect.Value)
         }
 
+        SessionHandler.ParseSession(&ctx)
         ret := route.handler.Call(valArgs)
+        SessionHandler.StoreSession(&ctx)
 
         if len(ret) == 0 {
             return
         }
-
+        
         sval, ok := ret[0].(*reflect.StringValue)
 
         if ok && !ctx.responseStarted {
@@ -408,6 +383,50 @@ func routeHandler(req *Request, c conn) {
 
     ctx.Abort(404, "Page not found")
 }
+
+/*
+ * Sessions
+ */
+ 
+type sessionHandler interface {
+  ParseSession(*Context) (os.Error)
+  StoreSession(*Context) (os.Error)
+}
+
+type Session map[string]interface{}
+
+type MemorySessionHandler struct {
+  Sessions map[string]Session
+}
+
+func (s *MemorySessionHandler) ParseSession(ctx *Context) (os.Error) {
+  var sessionId string
+  
+  // generate a unique sessionId if not found on cookies
+  sessionId, ok := ctx.GetSecureCookie("sessionId")
+  if !ok {
+    sessionId = strconv.Itoa64(rand.Int63())
+    ctx.SetSecureCookie("sessionId", sessionId, 0)
+    ctx.SessionId = sessionId
+    return nil
+  }
+
+  ctx.SessionId = sessionId  
+  ctx.Session, ok = s.Sessions[sessionId]
+
+  return nil
+}
+
+func (s *MemorySessionHandler) StoreSession(ctx *Context) (os.Error) {
+  sessionId := ctx.SessionId
+
+  s.Sessions[sessionId] = ctx.Session
+  return nil
+}
+
+/*
+ * Server
+ */
 
 //runs the web application and serves http requests
 func Run(addr string) {

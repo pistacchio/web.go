@@ -14,16 +14,18 @@ var (
 func index(ctx *web.Context) string {
   var num int = 0
   
-  c := ctx.GetSessionItem("num")
+  c := ctx.Session["num"]
   if c != nil {
     num = c.(int)
     num++
-    ctx.SetSessionItem("num", num)
+    ctx.Session["num"] = num
   } else {
-    ctx.SetSessionItem("num", 0)
+    ctx.Session["num"] = 0
   }
 
   return "You hit this page " + strconv.Itoa(num) + " times"
+  
+  return "oK"
   
 }
 
