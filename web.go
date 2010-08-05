@@ -45,8 +45,14 @@ func init() {
       SetCookieSecret(cookieSecretSalt)
     }
     
-    SessionHandler = &MemorySessionHandler{make(map[string]Session)}
+    SessionHandler = new(MemorySessionHandler)
+    SessionHandler.Init()
 }
+
+const (
+  defaultSessionDuration = 600 // 10 minutes in seconds
+  sessioCleanerTick = 60000000000 // 1 minute in nanoseconds
+)
 
 var (
   //secret key used to store cookies
@@ -291,9 +297,7 @@ func routeHandler(req *Request, c conn) {
     ctx := *new(Context)
     ctx.Request = req
     ctx.conn = &c
-    ctx.Session = make(map[string]interface{})
     ctx.responseStarted = false
-    //{req, &c, make(map[string]interface{}), false}
 
     //set some default headers
     ctx.SetHeader("Content-Type", "text/html; charset=utf-8", true)
@@ -391,12 +395,15 @@ func routeHandler(req *Request, c conn) {
 type sessionHandler interface {
   ParseSession(*Context) (os.Error)
   StoreSession(*Context) (os.Error)
+  Init() (os.Error)
 }
 
 type Session map[string]interface{}
 
 type MemorySessionHandler struct {
   Sessions map[string]Session
+  LastAccess map[string]int64
+  Duration int64
 }
 
 func (s *MemorySessionHandler) ParseSession(ctx *Context) (os.Error) {
@@ -408,19 +415,54 @@ func (s *MemorySessionHandler) ParseSession(ctx *Context) (os.Error) {
     sessionId = strconv.Itoa64(rand.Int63())
     ctx.SetSecureCookie("sessionId", sessionId, 0)
     ctx.SessionId = sessionId
+    ctx.Session = make(map[string]interface{})
     return nil
   }
 
   ctx.SessionId = sessionId  
   ctx.Session, ok = s.Sessions[sessionId]
+  if !ok {
+    ctx.Session = make(map[string]interface{})
+  }
+  s.LastAccess[sessionId] = time.Seconds()
 
   return nil
 }
 
 func (s *MemorySessionHandler) StoreSession(ctx *Context) (os.Error) {
   sessionId := ctx.SessionId
-
   s.Sessions[sessionId] = ctx.Session
+
+  return nil
+}
+
+func (s *MemorySessionHandler) Init() (os.Error) {
+  s.Sessions = make(map[string]Session)
+  s.LastAccess = make(map[string]int64)
+  
+  // set session duration in minutes
+  d, err := Config.GetInt("sessions", "duration")
+  if err != nil {
+    s.Duration = defaultSessionDuration
+  } else {
+    s.Duration = int64(d) * 60
+  }
+  
+  // start session cleanier
+  SessionCleanerTime := time.NewTicker(sessioCleanerTick)
+  
+  go func() {
+    for {
+      for sessionId, access := range s.LastAccess {
+          if access + s.Duration > time.Seconds() {
+            s.Sessions[sessionId] = nil, false
+            s.LastAccess[sessionId] = 0, false
+          }
+      }
+      <- SessionCleanerTime.C
+    }
+  }()
+
   return nil
 }
 

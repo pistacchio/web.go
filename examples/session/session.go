@@ -13,9 +13,9 @@ var (
 
 func index(ctx *web.Context) string {
   var num int = 0
-  
-  c := ctx.Session["num"]
-  if c != nil {
+
+  c, ok := ctx.Session["num"]
+  if ok {
     num = c.(int)
     num++
     ctx.Session["num"] = num
