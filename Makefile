@@ -12,6 +12,7 @@ GOFILES=\
 	request.go\
 	scgi.go\
 	servefile.go\
+	session.go\
 	status.go\
 	web.go\
 
