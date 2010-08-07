@@ -1,6 +1,7 @@
 package web
 
 import (
+  "json"
   "rand"
   "strconv"
   "time"
@@ -34,10 +35,6 @@ type MemorySessionHandler struct {
 }
 
 func (this *MemorySessionHandler) LoadSession(ctx *Context) {
-  if sessionHandler == nil {
-    return
-  }
-
   var sessionId string
     
   sessionId, ok := ctx.GetSecureCookie("sessionId")
@@ -47,7 +44,7 @@ func (this *MemorySessionHandler) LoadSession(ctx *Context) {
     sessionId = strconv.Itoa64(rand.Int63())
     ctx.SetSecureCookie("sessionId", sessionId, this.SessionLength)
     ctx.SessionId = sessionId
-    ctx.Session = make(map[string]interface{})
+    ctx.Session = make(Session)
     return
   }
 
@@ -56,7 +53,7 @@ func (this *MemorySessionHandler) LoadSession(ctx *Context) {
   
   // initialize an empty session if no previous one is found
   if !ok {
-    ctx.Session = make(map[string]interface{})
+    ctx.Session = make(Session)
   }
   
   // set to "now" the last access for the session
@@ -64,10 +61,6 @@ func (this *MemorySessionHandler) LoadSession(ctx *Context) {
 }
 
 func (this *MemorySessionHandler) SaveSession(ctx *Context) {
-  if sessionHandler == nil {
-    return
-  }
-
   sessionId := ctx.SessionId
   
   // saves in memory all the changes made to ctx.Session
@@ -108,6 +101,41 @@ func (this *MemorySessionHandler) Init() bool {
 }
 
 /*
+ * cookie-based sessions
+ */
+ 
+type CookieSessionHandler struct {
+  SessionLength int64         // in seconds
+}
+
+func (this *CookieSessionHandler) LoadSession(ctx *Context) {
+  ctx.Session = make(map[string]interface{})    
+  
+  // session variables stored like key1::value1||key2::value2||key3::value3
+  sessionData, ok := ctx.GetSecureCookie("sessionData")
+  if ok {
+    json.Unmarshal([]byte(sessionData), &ctx.Session)
+  }
+}
+
+func (this *CookieSessionHandler) SaveSession(ctx *Context) {
+  sessionData, _ := json.Marshal(ctx.Session)
+  ctx.SetSecureCookie("sessionData", string(sessionData), this.SessionLength)
+}
+
+func (this *CookieSessionHandler) Init() bool {
+  // set session length in seconds
+  length, err := Config.GetInt("session", "length")
+  if err != nil {
+    this.SessionLength = DefaultSessionLength
+  } else {
+    this.SessionLength = int64(length)
+  }
+  
+  return true
+}
+
+/*
  * dummy session handler
  */
 
@@ -131,6 +159,8 @@ func InitSessionHandler() {
     switch storeType {
       case "memory":
         sessionHandler = new(MemorySessionHandler)
+      case "cookie":
+        sessionHandler = new(CookieSessionHandler)
     }
   }
   
