@@ -12,21 +12,20 @@ var (
 
 
 func index(ctx *web.Context) string {
-  var num int = 0
+  var num float64 = 0
 
   c, ok := ctx.Session["num"]
   if ok {
-    num = c.(int)
+    num = c.(float64)
     num++
     ctx.Session["num"] = num
   } else {
     ctx.Session["num"] = 0
   }
 
-  return "You hit this page " + strconv.Itoa(num) + " times"
+  return "You hit this page " + strconv.Ftoa64(num, 'f', 0) + " times"
   
   return "oK"
-  
 }
 
 func main() {

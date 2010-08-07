@@ -1,3 +1,9 @@
+/*
+ * note on the Session implementation:
+ * at present time, when storing session data to cookies or files
+ * all numeric types must be float64
+ */
+ 
 package web
 
 import (
@@ -16,13 +22,15 @@ var (
   sessionHandler SessionHandler
 )
 
+type Session map[string]interface{}
+
 type SessionHandler interface {
   LoadSession(*Context)
   SaveSession(*Context)
   Init() bool
+  GetSessionLength() int64
 }
 
-type Session map[string]interface{}
 
 /*
  * in-memory sessions
@@ -35,21 +43,8 @@ type MemorySessionHandler struct {
 }
 
 func (this *MemorySessionHandler) LoadSession(ctx *Context) {
-  var sessionId string
-    
-  sessionId, ok := ctx.GetSecureCookie("sessionId")
-
-  // generate and store a random sessionId if not found on cookies
-  if !ok {
-    sessionId = strconv.Itoa64(rand.Int63())
-    ctx.SetSecureCookie("sessionId", sessionId, this.SessionLength)
-    ctx.SessionId = sessionId
-    ctx.Session = make(Session)
-    return
-  }
-
-  ctx.SessionId = sessionId  
-  ctx.Session, ok = this.Sessions[sessionId]
+  ok := LoadSessionId(ctx, this)
+  ctx.Session, ok = this.Sessions[ctx.SessionId]
   
   // initialize an empty session if no previous one is found
   if !ok {
@@ -57,7 +52,7 @@ func (this *MemorySessionHandler) LoadSession(ctx *Context) {
   }
   
   // set to "now" the last access for the session
-  this.LastAccess[sessionId] = time.Seconds()
+  this.LastAccess[ctx.SessionId] = time.Seconds()
 }
 
 func (this *MemorySessionHandler) SaveSession(ctx *Context) {
@@ -100,6 +95,10 @@ func (this *MemorySessionHandler) Init() bool {
   return true
 }
 
+func (this *MemorySessionHandler) GetSessionLength() int64 {
+  return this.SessionLength
+}
+
 /*
  * cookie-based sessions
  */
@@ -109,7 +108,8 @@ type CookieSessionHandler struct {
 }
 
 func (this *CookieSessionHandler) LoadSession(ctx *Context) {
-  ctx.Session = make(map[string]interface{})    
+  LoadSessionId(ctx, this)
+  ctx.Session = make(Session)
   
   // session variables stored like key1::value1||key2::value2||key3::value3
   sessionData, ok := ctx.GetSecureCookie("sessionData")
@@ -135,6 +135,10 @@ func (this *CookieSessionHandler) Init() bool {
   return true
 }
 
+func (this *CookieSessionHandler) GetSessionLength() int64 {
+  return this.SessionLength
+}
+
 /*
  * dummy session handler
  */
@@ -146,6 +150,7 @@ func (this *DummySessionHandler) LoadSession(ctx *Context) {
   ctx.Session = make(map[string]interface{})
 }
 func (this *DummySessionHandler) Init() bool { return true }
+func (this *DummySessionHandler) GetSessionLength() int64 { return 0 }
 
 /*
  * global functions
@@ -176,4 +181,22 @@ func InitSessionHandler() {
     sessionHandler = new(DummySessionHandler)
   }
 
+}
+
+// return true = already existing SessionId
+// false = newly created SessionId
+func LoadSessionId(ctx *Context, sessionHandler SessionHandler) bool {
+  sessionId, ok := ctx.GetSecureCookie("sessionId")
+
+  // generate and store a random sessionId if not found on cookies
+  if !ok {
+    sessionId = strconv.Itoa64(rand.Int63())
+    ctx.SetSecureCookie("sessionId", sessionId,
+                          sessionHandler.GetSessionLength())
+    ctx.SessionId = sessionId
+    return false
+  }
+
+  ctx.SessionId = sessionId  
+  return true
 }
