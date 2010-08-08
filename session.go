@@ -7,7 +7,10 @@
 package web
 
 import (
+  "fmt"
+  "io/ioutil"
   "json"
+  "os"
   "rand"
   "strconv"
   "time"
@@ -16,6 +19,8 @@ import (
 const (
   DefaultSessionLength  = 600         // 600 seconds = 10 minutes
   SessionCleanerTick    = 60000000000 // 60000000000 nanoseconds = 1 minute
+  SessionDirectory      = "session"   // used to store session data when using
+                                      //    file-based sessions
 )
 
 var (
@@ -29,6 +34,7 @@ type SessionHandler interface {
   SaveSession(*Context)
   Init() bool
   GetSessionLength() int64
+  SetSessionLength(int64)
 }
 
 
@@ -43,7 +49,7 @@ type MemorySessionHandler struct {
 }
 
 func (this *MemorySessionHandler) LoadSession(ctx *Context) {
-  ok := LoadSessionId(ctx, this)
+  ok := LoadSessionId(ctx)
   ctx.Session, ok = this.Sessions[ctx.SessionId]
   
   // initialize an empty session if no previous one is found
@@ -65,17 +71,10 @@ func (this *MemorySessionHandler) SaveSession(ctx *Context) {
 func (this *MemorySessionHandler) Init() bool {
   this.Sessions = make(map[string]Session)
   this.LastAccess = make(map[string]int64)
-  
-  // set session length in seconds
-  length, err := Config.GetInt("session", "length")
-  if err != nil {
-    this.SessionLength = DefaultSessionLength
-  } else {
-    this.SessionLength = int64(length)
-  }
+  SetSessionLength()
   
   // starts a timer that thicks every n seconds
-  // the cleaning gorouting with perform pruning of unused sessions
+  // the cleaning goroutine with perform pruning of unused sessions
   // every tick
   SessionCleanerTimer := time.NewTicker(SessionCleanerTick)
   
@@ -99,6 +98,10 @@ func (this *MemorySessionHandler) GetSessionLength() int64 {
   return this.SessionLength
 }
 
+func (this *MemorySessionHandler) SetSessionLength(length int64) {
+  this.SessionLength = length
+}
+
 /*
  * cookie-based sessions
  */
@@ -108,10 +111,9 @@ type CookieSessionHandler struct {
 }
 
 func (this *CookieSessionHandler) LoadSession(ctx *Context) {
-  LoadSessionId(ctx, this)
+  LoadSessionId(ctx)
   ctx.Session = make(Session)
   
-  // session variables stored like key1::value1||key2::value2||key3::value3
   sessionData, ok := ctx.GetSecureCookie("sessionData")
   if ok {
     json.Unmarshal([]byte(sessionData), &ctx.Session)
@@ -124,19 +126,90 @@ func (this *CookieSessionHandler) SaveSession(ctx *Context) {
 }
 
 func (this *CookieSessionHandler) Init() bool {
-  // set session length in seconds
-  length, err := Config.GetInt("session", "length")
-  if err != nil {
-    this.SessionLength = DefaultSessionLength
-  } else {
-    this.SessionLength = int64(length)
-  }
+  SetSessionLength()
   
   return true
 }
 
 func (this *CookieSessionHandler) GetSessionLength() int64 {
   return this.SessionLength
+}
+
+func (this *CookieSessionHandler) SetSessionLength(length int64) {
+  this.SessionLength = length
+}
+
+/*
+ * file-based sessions
+ */
+
+type FileSessionHandler struct {
+  SessionLength int64         // in seconds
+}
+
+func (this *FileSessionHandler) LoadSession(ctx *Context) {
+  LoadSessionId(ctx)
+  ctx.Session = make(Session)  
+  sessionFile := fmt.Sprintf("%s/%s", SessionDirectory, ctx.SessionId)
+
+  // if the file is not found, just touch it
+  ok := fileExists(sessionFile)
+  if !ok {
+    ioutil.WriteFile(sessionFile, make([]byte, 0), 0660)
+    return
+  }
+
+  sessionData, err := ioutil.ReadFile(sessionFile)
+  if err == nil {
+    json.Unmarshal(sessionData, &ctx.Session)
+  }
+}
+
+func (this *FileSessionHandler) SaveSession(ctx *Context) {
+  sessionFile := fmt.Sprintf("%s/%s", SessionDirectory, ctx.SessionId)
+  sessionData, _ := json.Marshal(ctx.Session)
+  ioutil.WriteFile(sessionFile, sessionData, 660)
+}
+
+func (this *FileSessionHandler) Init() bool {
+  SetSessionLength()
+
+ // check if "session" directory exists
+ if !dirExists(SessionDirectory) {
+   fmt.Printf("To use file-based sessions, please create a \"%s\" dir\n", 
+                  SessionDirectory)
+   return false
+ }
+
+ // starts a timer that thicks every n seconds
+ // the cleaning goroutine with perform pruning of unused session files
+ // every tick
+ SessionCleanerTimer := time.NewTicker(SessionCleanerTick)
+ 
+  go func() {
+    for {
+      sessionDirFiles, _ := ioutil.ReadDir(SessionDirectory)
+      for _, file := range sessionDirFiles {
+        // delete the file if too old
+        if file.Mtime_ns + this.SessionLength > time.Seconds() {
+          sessionFile := fmt.Sprintf("%s/%s", SessionDirectory, file.Name)
+          os.Remove(sessionFile)
+        }
+      }
+      <- SessionCleanerTimer.C
+    }
+  }()
+
+
+ return true
+}
+
+func (this *FileSessionHandler) GetSessionLength() int64 {
+  return this.SessionLength
+}
+
+func (this *FileSessionHandler) SetSessionLength(length int64) {
+  this.SessionLength = length
 }
 
 /*
@@ -151,6 +224,7 @@ func (this *DummySessionHandler) LoadSession(ctx *Context) {
 }
 func (this *DummySessionHandler) Init() bool { return true }
 func (this *DummySessionHandler) GetSessionLength() int64 { return 0 }
+func (this *DummySessionHandler) SetSessionLength(length int64) { }
 
 /*
  * global functions
@@ -166,6 +240,8 @@ func InitSessionHandler() {
         sessionHandler = new(MemorySessionHandler)
       case "cookie":
         sessionHandler = new(CookieSessionHandler)
+      case "file":
+        sessionHandler = new(FileSessionHandler)
     }
   }
   
@@ -183,9 +259,20 @@ func InitSessionHandler() {
 
 }
 
+func SetSessionLength() {
+  // set session length in seconds
+  length, err := Config.GetInt("session", "length")
+  if err != nil {
+    sessionHandler.SetSessionLength(DefaultSessionLength)
+  } else {
+    sessionHandler.SetSessionLength(int64(length))
+  }
+  
+}
+
 // return true = already existing SessionId
 // false = newly created SessionId
-func LoadSessionId(ctx *Context, sessionHandler SessionHandler) bool {
+func LoadSessionId(ctx *Context) bool {
   sessionId, ok := ctx.GetSecureCookie("sessionId")
 
   // generate and store a random sessionId if not found on cookies
