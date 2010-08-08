@@ -1,7 +1,7 @@
 /*
  * note on the Session implementation:
  * at present time, when storing session data to cookies or files
- * all numeric types must be float64
+ * all numeric types must be float64 and no pointer types can be saved
  */
  
 package web
@@ -57,7 +57,7 @@ func (this *MemorySessionHandler) LoadSession(ctx *Context) {
 
 func (this *MemorySessionHandler) SaveSession(ctx *Context) {
   sessionId := ctx.SessionId
-  
+    
   // saves in memory all the changes made to ctx.Session
   this.Sessions[sessionId] = ctx.Session
 }

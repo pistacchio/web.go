@@ -18,14 +18,11 @@ func index(ctx *web.Context) string {
   if ok {
     num = c.(float64)
     num++
-    ctx.Session["num"] = num
-  } else {
-    ctx.Session["num"] = 0
   }
+  
+  ctx.Session["num"] = num
 
   return "You hit this page " + strconv.Ftoa64(num, 'f', 0) + " times"
-  
-  return "oK"
 }
 
 func main() {
